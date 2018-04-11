@@ -23,11 +23,11 @@
  * THE SOFTWARE.
  */
 
-#ifndef QEMU_TAP_H
-#define QEMU_TAP_H
+#ifndef NET_TAP_INT_H
+#define NET_TAP_INT_H
 
 #include "qemu-common.h"
-#include "qapi-types.h"
+#include "qapi/qapi-types-net.h"
 
 int tap_open(char *ifname, int ifname_size, int *vnet_hdr,
              int vnet_hdr_required, int mq_required, Error **errp);
@@ -40,8 +40,10 @@ int tap_probe_vnet_hdr_len(int fd, int len);
 int tap_probe_has_ufo(int fd);
 void tap_fd_set_offload(int fd, int csum, int tso4, int tso6, int ecn, int ufo);
 void tap_fd_set_vnet_hdr_len(int fd, int len);
+int tap_fd_set_vnet_le(int fd, int vnet_is_le);
+int tap_fd_set_vnet_be(int fd, int vnet_is_be);
 int tap_fd_enable(int fd);
 int tap_fd_disable(int fd);
 int tap_fd_get_ifname(int fd, char *ifname);
 
-#endif /* QEMU_TAP_H */
+#endif /* NET_TAP_INT_H */

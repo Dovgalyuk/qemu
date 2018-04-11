@@ -23,6 +23,7 @@
  * THE SOFTWARE.
  */
 
+#include "qemu/osdep.h"
 #include "tap_int.h"
 #include "tap-linux.h"
 #include "net/tap.h"
@@ -31,8 +32,9 @@
 #include <sys/ioctl.h>
 
 #include "sysemu/sysemu.h"
-#include "qemu-common.h"
+#include "qapi/error.h"
 #include "qemu/error-report.h"
+#include "qemu/cutils.h"
 
 #define PATH_NET_TUN "/dev/net/tun"
 
@@ -53,7 +55,7 @@ int tap_open(char *ifname, int ifname_size, int *vnet_hdr,
     ifr.ifr_flags = IFF_TAP | IFF_NO_PI;
 
     if (ioctl(fd, TUNGETFEATURES, &features) == -1) {
-        error_report("warning: TUNGETFEATURES failed: %s", strerror(errno));
+        warn_report("TUNGETFEATURES failed: %s", strerror(errno));
         features = 0;
     }
 
@@ -196,6 +198,40 @@ void tap_fd_set_vnet_hdr_len(int fd, int len)
                 strerror(errno));
         abort();
     }
+}
+
+int tap_fd_set_vnet_le(int fd, int is_le)
+{
+    int arg = is_le ? 1 : 0;
+
+    if (!ioctl(fd, TUNSETVNETLE, &arg)) {
+        return 0;
+    }
+
+    /* Check if our kernel supports TUNSETVNETLE */
+    if (errno == EINVAL) {
+        return -errno;
+    }
+
+    error_report("TUNSETVNETLE ioctl() failed: %s.", strerror(errno));
+    abort();
+}
+
+int tap_fd_set_vnet_be(int fd, int is_be)
+{
+    int arg = is_be ? 1 : 0;
+
+    if (!ioctl(fd, TUNSETVNETBE, &arg)) {
+        return 0;
+    }
+
+    /* Check if our kernel supports TUNSETVNETBE */
+    if (errno == EINVAL) {
+        return -errno;
+    }
+
+    error_report("TUNSETVNETBE ioctl() failed: %s.", strerror(errno));
+    abort();
 }
 
 void tap_fd_set_offload(int fd, int csum, int tso4,

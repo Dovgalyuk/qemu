@@ -12,8 +12,9 @@
  * the COPYING file in the top-level directory.
  *
  */
-#ifndef _QEMU_VIRTIO_SERIAL_H
-#define _QEMU_VIRTIO_SERIAL_H
+
+#ifndef QEMU_VIRTIO_SERIAL_H
+#define QEMU_VIRTIO_SERIAL_H
 
 #include "standard-headers/linux/virtio_console.h"
 #include "hw/qdev.h"
@@ -56,6 +57,9 @@ typedef struct VirtIOSerialPortClass {
     /* Callbacks for guest events */
         /* Guest opened/closed device. */
     void (*set_guest_connected)(VirtIOSerialPort *port, int guest_connected);
+
+    /* Enable/disable backend for virtio serial port */
+    void (*enable_backend)(VirtIOSerialPort *port, bool enable);
 
         /* Guest is now ready to accept data (virtqueues set up). */
     void (*guest_ready)(VirtIOSerialPort *port);
@@ -122,7 +126,7 @@ struct VirtIOSerialPort {
      * element popped and continue consuming it once the backend
      * becomes writable again.
      */
-    VirtQueueElement elem;
+    VirtQueueElement *elem;
 
     /*
      * The index and the offset into the iov buffer that was popped in
@@ -183,6 +187,8 @@ struct VirtIOSerial {
     struct VirtIOSerialPostLoad *post_load;
 
     virtio_serial_conf serial;
+
+    uint64_t host_features;
 };
 
 /* Interface to the virtio-serial bus */
@@ -220,8 +226,5 @@ void virtio_serial_throttle_port(VirtIOSerialPort *port, bool throttle);
 #define TYPE_VIRTIO_SERIAL "virtio-serial-device"
 #define VIRTIO_SERIAL(obj) \
         OBJECT_CHECK(VirtIOSerial, (obj), TYPE_VIRTIO_SERIAL)
-
-#define DEFINE_VIRTIO_SERIAL_PROPERTIES(_state, _field) \
-        DEFINE_PROP_UINT32("max_ports", _state, _field.max_virtserial_ports, 31)
 
 #endif

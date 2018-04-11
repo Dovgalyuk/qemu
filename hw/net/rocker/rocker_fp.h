@@ -14,8 +14,8 @@
  * GNU General Public License for more details.
  */
 
-#ifndef _ROCKER_FP_H_
-#define _ROCKER_FP_H_
+#ifndef ROCKER_FP_H
+#define ROCKER_FP_H
 
 #include "net/net.h"
 #include "qemu/iov.h"
@@ -26,7 +26,9 @@ typedef struct fp_port FpPort;
 
 int fp_port_eg(FpPort *port, const struct iovec *iov, int iovcnt);
 
+char *fp_port_get_name(FpPort *port);
 bool fp_port_get_link_up(FpPort *port);
+void fp_port_get_info(FpPort *port, RockerPortList *info);
 void fp_port_get_macaddr(FpPort *port, MACAddr *macaddr);
 void fp_port_set_macaddr(FpPort *port, MACAddr *macaddr);
 uint8_t fp_port_get_learning(FpPort *port);
@@ -38,6 +40,7 @@ int fp_port_set_settings(FpPort *port, uint32_t speed,
 bool fp_port_from_pport(uint32_t pport, uint32_t *port);
 World *fp_port_get_world(FpPort *port);
 void fp_port_set_world(FpPort *port, World *world);
+bool fp_port_check_world(FpPort *port, World *world);
 bool fp_port_enabled(FpPort *port);
 void fp_port_enable(FpPort *port);
 void fp_port_disable(FpPort *port);
@@ -48,4 +51,4 @@ FpPort *fp_port_alloc(Rocker *r, char *sw_name,
 void fp_port_free(FpPort *port);
 void fp_port_reset(FpPort *port);
 
-#endif /* _ROCKER_FP_H_ */
+#endif /* ROCKER_FP_H */

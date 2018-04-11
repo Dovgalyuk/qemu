@@ -9,6 +9,7 @@
  * the COPYING file in the top-level directory.
  */
 
+#include "qemu/osdep.h"
 #include <sys/resource.h>
 #include <getopt.h>
 #include <syslog.h>
@@ -23,9 +24,9 @@
 #include "qemu-common.h"
 #include "qemu/sockets.h"
 #include "qemu/xattr.h"
-#include "virtio-9p-marshal.h"
-#include "hw/9pfs/virtio-9p-proxy.h"
-#include "fsdev/virtio-9p-marshal.h"
+#include "9p-iov-marshal.h"
+#include "hw/9pfs/9p-proxy.h"
+#include "fsdev/9p-iov-marshal.h"
 
 #define PROGNAME "virtfs-proxy-helper"
 
@@ -49,10 +50,12 @@ static struct option helper_opts[] = {
     {"socket", required_argument, NULL, 's'},
     {"uid", required_argument, NULL, 'u'},
     {"gid", required_argument, NULL, 'g'},
+    {},
 };
 
 static bool is_daemon;
 static bool get_version; /* IOC getversion IOCTL supported */
+static char *prog_name;
 
 static void GCC_FMT_ATTR(2, 3) do_log(int loglevel, const char *format, ...)
 {
@@ -738,7 +741,12 @@ static int proxy_socket(const char *path, uid_t uid, gid_t gid)
         return -1;
     }
 
-    g_assert(strlen(path) < sizeof(proxy.sun_path));
+    if (strlen(path) >= sizeof(proxy.sun_path)) {
+        do_log(LOG_CRIT, "UNIX domain socket path exceeds %zu characters\n",
+               sizeof(proxy.sun_path));
+        return -1;
+    }
+
     sock = socket(AF_UNIX, SOCK_STREAM, 0);
     if (sock < 0) {
         do_perror("socket");
@@ -778,7 +786,7 @@ error:
     return -1;
 }
 
-static void usage(char *prog)
+static void usage(void)
 {
     fprintf(stderr, "usage: %s\n"
             " -p|--path <path> 9p path to export\n"
@@ -788,7 +796,7 @@ static void usage(char *prog)
             " access to this socket\n"
             " \tNote: -s & -f can not be used together\n"
             " [-n|--nodaemon] Run as a normal program\n",
-            basename(prog));
+            prog_name);
 }
 
 static int process_reply(int sock, int type,
@@ -938,7 +946,8 @@ static int process_requests(int sock)
                                      &spec[0].tv_sec, &spec[0].tv_nsec,
                                      &spec[1].tv_sec, &spec[1].tv_nsec);
             if (retval > 0) {
-                retval = qemu_utimens(path.data, spec);
+                retval = utimensat(AT_FDCWD, path.data, spec,
+                                   AT_SYMLINK_NOFOLLOW);
                 if (retval < 0) {
                     retval = -errno;
                 }
@@ -1037,6 +1046,8 @@ int main(int argc, char **argv)
     struct statfs st_fs;
 #endif
 
+    prog_name = g_path_get_basename(argv[0]);
+
     is_daemon = true;
     sock = -1;
     own_u = own_g = -1;
@@ -1069,7 +1080,7 @@ int main(int argc, char **argv)
         case '?':
         case 'h':
         default:
-            usage(argv[0]);
+            usage();
             exit(EXIT_FAILURE);
         }
     }
@@ -1077,13 +1088,13 @@ int main(int argc, char **argv)
     /* Parameter validation */
     if ((sock_name == NULL && sock == -1) || rpath == NULL) {
         fprintf(stderr, "socket, socket descriptor or path not specified\n");
-        usage(argv[0]);
+        usage();
         return -1;
     }
 
     if (sock_name && sock != -1) {
         fprintf(stderr, "both named socket and socket descriptor specified\n");
-        usage(argv[0]);
+        usage();
         exit(EXIT_FAILURE);
     }
 
@@ -1091,7 +1102,7 @@ int main(int argc, char **argv)
         fprintf(stderr, "owner uid:gid not specified, ");
         fprintf(stderr,
                 "owner uid:gid specifies who can access the socket file\n");
-        usage(argv[0]);
+        usage();
         exit(EXIT_FAILURE);
     }
 
@@ -1122,10 +1133,19 @@ int main(int argc, char **argv)
         }
     }
 
+    if (chroot(rpath) < 0) {
+        do_perror("chroot");
+        goto error;
+    }
+    if (chdir("/") < 0) {
+        do_perror("chdir");
+        goto error;
+    }
+
     get_version = false;
 #ifdef FS_IOC_GETVERSION
     /* check whether underlying FS support IOC_GETVERSION */
-    retval = statfs(rpath, &st_fs);
+    retval = statfs("/", &st_fs);
     if (!retval) {
         switch (st_fs.f_type) {
         case EXT2_SUPER_MAGIC:
@@ -1138,22 +1158,15 @@ int main(int argc, char **argv)
     }
 #endif
 
-    if (chdir("/") < 0) {
-        do_perror("chdir");
-        goto error;
-    }
-    if (chroot(rpath) < 0) {
-        do_perror("chroot");
-        goto error;
-    }
     umask(0);
-
     if (init_capabilities() < 0) {
         goto error;
     }
 
     process_requests(sock);
 error:
+    g_free(rpath);
+    g_free(sock_name);
     do_log(LOG_INFO, "Done\n");
     closelog();
     return 0;

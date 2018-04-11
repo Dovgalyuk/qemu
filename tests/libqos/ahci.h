@@ -1,5 +1,5 @@
-#ifndef __libqos_ahci_h
-#define __libqos_ahci_h
+#ifndef LIBQOS_AHCI_H
+#define LIBQOS_AHCI_H
 
 /*
  * AHCI qtest library functions and definitions
@@ -25,9 +25,6 @@
  * THE SOFTWARE.
  */
 
-#include <stdint.h>
-#include <stdlib.h>
-#include <stdbool.h>
 #include "libqos/libqos.h"
 #include "libqos/pci.h"
 #include "libqos/malloc-pc.h"
@@ -244,6 +241,10 @@
 #define AHCI_VERSION_1_3         (0x00010300)
 
 #define AHCI_SECTOR_SIZE                (512)
+#define ATAPI_SECTOR_SIZE              (2048)
+
+#define AHCI_SIGNATURE_CDROM     (0xeb140101)
+#define AHCI_SIGNATURE_DISK      (0x00000101)
 
 /* FIS types */
 enum {
@@ -263,20 +264,45 @@ enum {
 /* ATA Commands */
 enum {
     /* DMA */
-    CMD_READ_DMA      = 0xC8,
-    CMD_READ_DMA_EXT  = 0x25,
-    CMD_WRITE_DMA     = 0xCA,
-    CMD_WRITE_DMA_EXT = 0x35,
+    CMD_READ_DMA       = 0xC8,
+    CMD_READ_DMA_EXT   = 0x25,
+    CMD_WRITE_DMA      = 0xCA,
+    CMD_WRITE_DMA_EXT  = 0x35,
     /* PIO */
-    CMD_READ_PIO      = 0x20,
-    CMD_READ_PIO_EXT  = 0x24,
-    CMD_WRITE_PIO     = 0x30,
-    CMD_WRITE_PIO_EXT = 0x34,
+    CMD_READ_PIO       = 0x20,
+    CMD_READ_PIO_EXT   = 0x24,
+    CMD_WRITE_PIO      = 0x30,
+    CMD_WRITE_PIO_EXT  = 0x34,
     /* Misc */
-    CMD_READ_MAX      = 0xF8,
-    CMD_READ_MAX_EXT  = 0x27,
-    CMD_FLUSH_CACHE   = 0xE7,
-    CMD_IDENTIFY      = 0xEC
+    CMD_READ_MAX       = 0xF8,
+    CMD_READ_MAX_EXT   = 0x27,
+    CMD_FLUSH_CACHE    = 0xE7,
+    CMD_IDENTIFY       = 0xEC,
+    CMD_PACKET         = 0xA0,
+    CMD_PACKET_ID      = 0xA1,
+    /* NCQ */
+    READ_FPDMA_QUEUED  = 0x60,
+    WRITE_FPDMA_QUEUED = 0x61,
+};
+
+/* ATAPI Commands */
+enum {
+    CMD_ATAPI_TEST_UNIT_READY = 0x00,
+    CMD_ATAPI_REQUEST_SENSE   = 0x03,
+    CMD_ATAPI_START_STOP_UNIT = 0x1b,
+    CMD_ATAPI_READ_10         = 0x28,
+    CMD_ATAPI_READ_CD         = 0xbe,
+};
+
+enum {
+    SENSE_NO_SENSE       = 0x00,
+    SENSE_NOT_READY      = 0x02,
+    SENSE_UNIT_ATTENTION = 0x06,
+};
+
+enum {
+    ASC_MEDIUM_MAY_HAVE_CHANGED = 0x28,
+    ASC_MEDIUM_NOT_PRESENT      = 0x3a,
 };
 
 /* AHCI Command Header Flags & Masks*/
@@ -291,8 +317,9 @@ enum {
 #define CMDH_PMP      (0xF000)
 
 /* ATA device register masks */
-#define ATA_DEVICE_MAGIC 0xA0
+#define ATA_DEVICE_MAGIC 0xA0 /* used in ata1-3 */
 #define ATA_DEVICE_LBA   0x40
+#define NCQ_DEVICE_MAGIC 0x40 /* for ncq device registers */
 #define ATA_DEVICE_DRIVE 0x10
 #define ATA_DEVICE_HEAD  0x0F
 
@@ -309,12 +336,13 @@ typedef struct AHCIPortQState {
 typedef struct AHCIQState {
     QOSState *parent;
     QPCIDevice *dev;
-    void *hba_base;
+    QPCIBar hba_bar;
     uint64_t barsize;
     uint32_t fingerprint;
     uint32_t cap;
     uint32_t cap2;
     AHCIPortQState port[32];
+    bool enabled;
 } AHCIQState;
 
 /**
@@ -397,6 +425,32 @@ typedef struct RegH2DFIS {
 } __attribute__((__packed__)) RegH2DFIS;
 
 /**
+ * Register host-to-device FIS structure, for NCQ commands.
+ * Actually just a RegH2DFIS, but with fields repurposed.
+ * Repurposed fields are annotated below.
+ */
+typedef struct NCQFIS {
+    /* DW0 */
+    uint8_t fis_type;
+    uint8_t flags;
+    uint8_t command;
+    uint8_t sector_low; /* H2D: Feature 7:0 */
+    /* DW1 */
+    uint8_t lba_lo[3];
+    uint8_t device;
+    /* DW2 */
+    uint8_t lba_hi[3];
+    uint8_t sector_hi; /* H2D: Feature 15:8 */
+    /* DW3 */
+    uint8_t tag;       /* H2D: Count 0:7 */
+    uint8_t prio;      /* H2D: Count 15:8 */
+    uint8_t icc;
+    uint8_t control;
+    /* DW4 */
+    uint8_t aux[4];
+} __attribute__((__packed__)) NCQFIS;
+
+/**
  * Command List entry structure.
  * The command list contains between 1-32 of these structures.
  */
@@ -421,6 +475,23 @@ typedef struct PRD {
 /* Opaque, defined within ahci.c */
 typedef struct AHCICommand AHCICommand;
 
+/* Options to ahci_exec */
+typedef struct AHCIOpts {
+    size_t size;        /* Size of transfer */
+    unsigned prd_size;  /* Size per-each PRD */
+    bool set_bcl;       /* Override the default BCL of ATAPI_SECTOR_SIZE */
+    unsigned bcl;       /* Byte Count Limit, for ATAPI PIO */
+    uint64_t lba;       /* Starting LBA offset */
+    uint64_t buffer;    /* Pointer to source or destination guest buffer */
+    bool atapi;         /* ATAPI command? */
+    bool atapi_dma;     /* Use DMA for ATAPI? */
+    bool error;
+    int (*pre_cb)(AHCIQState*, AHCICommand*, const struct AHCIOpts *);
+    int (*mid_cb)(AHCIQState*, AHCICommand*, const struct AHCIOpts *);
+    int (*post_cb)(AHCIQState*, AHCICommand*, const struct AHCIOpts *);
+    void *opaque;
+} AHCIOpts;
+
 /*** Macro Utilities ***/
 #define BITANY(data, mask) (((data) & (mask)) != 0)
 #define BITSET(data, mask) (((data) & (mask)) == (mask))
@@ -435,12 +506,12 @@ typedef struct AHCICommand AHCICommand;
 
 static inline uint32_t ahci_mread(AHCIQState *ahci, size_t offset)
 {
-    return qpci_io_readl(ahci->dev, ahci->hba_base + offset);
+    return qpci_io_readl(ahci->dev, ahci->hba_bar, offset);
 }
 
 static inline void ahci_mwrite(AHCIQState *ahci, size_t offset, uint32_t value)
 {
-    qpci_io_writel(ahci->dev, ahci->hba_base + offset, value);
+    qpci_io_writel(ahci->dev, ahci->hba_bar, offset, value);
 }
 
 static inline uint32_t ahci_rreg(AHCIQState *ahci, uint32_t reg_num)
@@ -497,31 +568,43 @@ static inline void ahci_px_clr(AHCIQState *ahci, uint8_t port,
 /*** Prototypes ***/
 uint64_t ahci_alloc(AHCIQState *ahci, size_t bytes);
 void ahci_free(AHCIQState *ahci, uint64_t addr);
-QPCIDevice *get_ahci_device(uint32_t *fingerprint);
-void free_ahci_device(QPCIDevice *dev);
 void ahci_clean_mem(AHCIQState *ahci);
+
+/* Device management */
+QPCIDevice *get_ahci_device(QTestState *qts, uint32_t *fingerprint);
+void free_ahci_device(QPCIDevice *dev);
 void ahci_pci_enable(AHCIQState *ahci);
 void start_ahci_device(AHCIQState *ahci);
 void ahci_hba_enable(AHCIQState *ahci);
+
+/* Port Management */
 unsigned ahci_port_select(AHCIQState *ahci);
 void ahci_port_clear(AHCIQState *ahci, uint8_t port);
-void ahci_port_check_error(AHCIQState *ahci, uint8_t port);
+
+/* Command header / table management */
+unsigned ahci_pick_cmd(AHCIQState *ahci, uint8_t port);
+void ahci_get_command_header(AHCIQState *ahci, uint8_t port,
+                             uint8_t slot, AHCICommandHeader *cmd);
+void ahci_set_command_header(AHCIQState *ahci, uint8_t port,
+                             uint8_t slot, AHCICommandHeader *cmd);
+void ahci_destroy_command(AHCIQState *ahci, uint8_t port, uint8_t slot);
+
+/* AHCI sanity check routines */
+void ahci_port_check_error(AHCIQState *ahci, uint8_t port,
+                           uint32_t imask, uint8_t emask);
 void ahci_port_check_interrupts(AHCIQState *ahci, uint8_t port,
                                 uint32_t intr_mask);
 void ahci_port_check_nonbusy(AHCIQState *ahci, uint8_t port, uint8_t slot);
 void ahci_port_check_d2h_sanity(AHCIQState *ahci, uint8_t port, uint8_t slot);
 void ahci_port_check_pio_sanity(AHCIQState *ahci, uint8_t port,
                                 uint8_t slot, size_t buffsize);
-void ahci_port_check_cmd_sanity(AHCIQState *ahci, uint8_t port,
-                                uint8_t slot, size_t buffsize);
-void ahci_get_command_header(AHCIQState *ahci, uint8_t port,
-                             uint8_t slot, AHCICommandHeader *cmd);
-void ahci_set_command_header(AHCIQState *ahci, uint8_t port,
-                             uint8_t slot, AHCICommandHeader *cmd);
-void ahci_destroy_command(AHCIQState *ahci, uint8_t port, uint8_t slot);
-void ahci_write_fis(AHCIQState *ahci, RegH2DFIS *fis, uint64_t addr);
-unsigned ahci_pick_cmd(AHCIQState *ahci, uint8_t port);
+void ahci_port_check_cmd_sanity(AHCIQState *ahci, AHCICommand *cmd);
+
+/* Misc */
+bool is_atapi(AHCIQState *ahci, uint8_t port);
 unsigned size_to_prdtl(unsigned bytes, unsigned bytes_per_prd);
+
+/* Command: Macro level execution */
 void ahci_guest_io(AHCIQState *ahci, uint8_t port, uint8_t ide_cmd,
                    uint64_t gbuffer, size_t size, uint64_t sector);
 AHCICommand *ahci_guest_io_halt(AHCIQState *ahci, uint8_t port, uint8_t ide_cmd,
@@ -529,9 +612,18 @@ AHCICommand *ahci_guest_io_halt(AHCIQState *ahci, uint8_t port, uint8_t ide_cmd,
 void ahci_guest_io_resume(AHCIQState *ahci, AHCICommand *cmd);
 void ahci_io(AHCIQState *ahci, uint8_t port, uint8_t ide_cmd,
              void *buffer, size_t bufsize, uint64_t sector);
+void ahci_exec(AHCIQState *ahci, uint8_t port,
+               uint8_t op, const AHCIOpts *opts);
+void ahci_atapi_test_ready(AHCIQState *ahci, uint8_t port, bool ready,
+                           uint8_t expected_sense);
+void ahci_atapi_get_sense(AHCIQState *ahci, uint8_t port,
+                          uint8_t *sense, uint8_t *asc);
+void ahci_atapi_eject(AHCIQState *ahci, uint8_t port);
+void ahci_atapi_load(AHCIQState *ahci, uint8_t port);
 
-/* Command Lifecycle */
+/* Command: Fine-grained lifecycle */
 AHCICommand *ahci_command_create(uint8_t command_name);
+AHCICommand *ahci_atapi_command_create(uint8_t scsi_cmd, uint16_t bcl);
 void ahci_command_commit(AHCIQState *ahci, AHCICommand *cmd, uint8_t port);
 void ahci_command_issue(AHCIQState *ahci, AHCICommand *cmd);
 void ahci_command_issue_async(AHCIQState *ahci, AHCICommand *cmd);
@@ -539,7 +631,7 @@ void ahci_command_wait(AHCIQState *ahci, AHCICommand *cmd);
 void ahci_command_verify(AHCIQState *ahci, AHCICommand *cmd);
 void ahci_command_free(AHCICommand *cmd);
 
-/* Command adjustments */
+/* Command: adjustments */
 void ahci_command_set_flags(AHCICommand *cmd, uint16_t cmdh_flags);
 void ahci_command_clr_flags(AHCICommand *cmd, uint16_t cmdh_flags);
 void ahci_command_set_offset(AHCICommand *cmd, uint64_t lba_sect);
@@ -548,10 +640,13 @@ void ahci_command_set_size(AHCICommand *cmd, uint64_t xbytes);
 void ahci_command_set_prd_size(AHCICommand *cmd, unsigned prd_size);
 void ahci_command_set_sizes(AHCICommand *cmd, uint64_t xbytes,
                             unsigned prd_size);
+void ahci_command_set_acmd(AHCICommand *cmd, void *acmd);
+void ahci_command_enable_atapi_dma(AHCICommand *cmd);
 void ahci_command_adjust(AHCICommand *cmd, uint64_t lba_sect, uint64_t gbuffer,
                          uint64_t xbytes, unsigned prd_size);
 
-/* Command Misc */
+/* Command: Misc */
 uint8_t ahci_command_slot(AHCICommand *cmd);
+void ahci_write_fis(AHCIQState *ahci, AHCICommand *cmd);
 
 #endif

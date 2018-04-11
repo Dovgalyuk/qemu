@@ -24,14 +24,17 @@
  * THE SOFTWARE.
  */
 
+#include "qemu/osdep.h"
+#include "qemu-common.h"
+#include "cpu.h"
 #include "qemu/option.h"
 #include "qemu/config-file.h"
 #include "qemu/error-report.h"
-#include "qemu-common.h"
 #include "sysemu/device_tree.h"
 #include "sysemu/sysemu.h"
 #include "hw/loader.h"
 #include "elf.h"
+#include "qemu/cutils.h"
 
 #include "boot.h"
 
@@ -48,13 +51,14 @@ static struct
 static void main_cpu_reset(void *opaque)
 {
     MicroBlazeCPU *cpu = opaque;
+    CPUState *cs = CPU(cpu);
     CPUMBState *env = &cpu->env;
 
-    cpu_reset(CPU(cpu));
+    cpu_reset(cs);
     env->regs[5] = boot_info.cmdline;
     env->regs[6] = boot_info.initrd_start;
     env->regs[7] = boot_info.fdt;
-    env->sregs[SR_PC] = boot_info.bootstrap_pc;
+    cpu_set_pc(cs, boot_info.bootstrap_pc);
     if (boot_info.machine_cpu_reset) {
         boot_info.machine_cpu_reset(cpu);
     }
@@ -120,7 +124,7 @@ void microblaze_load_kernel(MicroBlazeCPU *cpu, hwaddr ddr_base,
     kernel_cmdline = qemu_opt_get(machine_opts, "append");
     dtb_arg = qemu_opt_get(machine_opts, "dtb");
     /* default to pcbios dtb as passed by machine_init */
-    if (!dtb_arg) {
+    if (!dtb_arg && dtb_filename) {
         filename = qemu_find_file(QEMU_FILE_TYPE_BIOS, dtb_filename);
     }
 
@@ -140,12 +144,12 @@ void microblaze_load_kernel(MicroBlazeCPU *cpu, hwaddr ddr_base,
         /* Boots a kernel elf binary.  */
         kernel_size = load_elf(kernel_filename, NULL, NULL,
                                &entry, &low, &high,
-                               big_endian, ELF_MACHINE, 0);
+                               big_endian, EM_MICROBLAZE, 0, 0);
         base32 = entry;
         if (base32 == 0xc0000000) {
             kernel_size = load_elf(kernel_filename, translate_kernel_address,
                                    NULL, &entry, NULL, NULL,
-                                   big_endian, ELF_MACHINE, 0);
+                                   big_endian, EM_MICROBLAZE, 0, 0);
         }
         /* Always boot into physical ram.  */
         boot_info.bootstrap_pc = (uint32_t)entry;
@@ -185,7 +189,7 @@ void microblaze_load_kernel(MicroBlazeCPU *cpu, hwaddr ddr_base,
                                                   ram_size - initrd_offset);
             }
             if (initrd_size < 0) {
-                error_report("qemu: could not load initrd '%s'",
+                error_report("could not load initrd '%s'",
                              initrd_filename);
                 exit(EXIT_FAILURE);
             }

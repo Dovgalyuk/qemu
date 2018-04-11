@@ -14,10 +14,12 @@
  * GNU General Public License for more details.
  */
 
+#include "qemu/osdep.h"
 #include "net/eth.h"
+#include "qapi/error.h"
+#include "qapi/qapi-commands-rocker.h"
 #include "qemu/iov.h"
 #include "qemu/timer.h"
-#include "qmp-commands.h"
 
 #include "rocker.h"
 #include "rocker_hw.h"
@@ -102,9 +104,8 @@ typedef struct of_dpa_flow_key {
 
 /* Width of key which includes field 'f' in u64s, rounded up */
 #define FLOW_KEY_WIDTH(f) \
-    ((offsetof(OfDpaFlowKey, f) + \
-      sizeof(((OfDpaFlowKey *)0)->f) + \
-      sizeof(uint64_t) - 1) / sizeof(uint64_t))
+    DIV_ROUND_UP(offsetof(OfDpaFlowKey, f) + sizeof(((OfDpaFlowKey *)0)->f), \
+    sizeof(uint64_t))
 
 typedef struct of_dpa_flow_action {
     uint32_t goto_tbl;
@@ -367,10 +368,7 @@ static OfDpaFlow *of_dpa_flow_alloc(uint64_t cookie)
     OfDpaFlow *flow;
     int64_t now = qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL) / 1000;
 
-    flow = g_malloc0(sizeof(OfDpaFlow));
-    if (!flow) {
-        return NULL;
-    }
+    flow = g_new0(OfDpaFlow, 1);
 
     flow->cookie = cookie;
     flow->mask.tbl_id = 0xffffffff;
@@ -811,11 +809,7 @@ static int of_dpa_group_get_stats(OfDpa *of_dpa, uint32_t id)
 
 static OfDpaGroup *of_dpa_group_alloc(uint32_t id)
 {
-    OfDpaGroup *group = g_malloc0(sizeof(OfDpaGroup));
-
-    if (!group) {
-        return NULL;
-    }
+    OfDpaGroup *group = g_new0(OfDpaGroup, 1);
 
     group->id = id;
 
@@ -825,6 +819,8 @@ static OfDpaGroup *of_dpa_group_alloc(uint32_t id)
 static void of_dpa_output_l2_interface(OfDpaFlowContext *fc,
                                        OfDpaGroup *group)
 {
+    uint8_t copy_to_cpu = fc->action_set.apply.copy_to_cpu;
+
     if (group->l2_interface.pop_vlan) {
         of_dpa_flow_pkt_strip_vlan(fc);
     }
@@ -837,7 +833,8 @@ static void of_dpa_output_l2_interface(OfDpaFlowContext *fc,
      */
 
     if (group->l2_interface.out_pport == 0) {
-        rx_produce(fc->of_dpa->world, fc->in_pport, fc->iov, fc->iovcnt);
+        rx_produce(fc->of_dpa->world, fc->in_pport, fc->iov, fc->iovcnt,
+                   copy_to_cpu);
     } else if (group->l2_interface.out_pport != fc->in_pport) {
         rocker_port_eg(world_rocker(fc->of_dpa->world),
                        group->l2_interface.out_pport,
@@ -1864,9 +1861,6 @@ static int of_dpa_cmd_flow_add(OfDpa *of_dpa, uint64_t cookie,
     }
 
     flow = of_dpa_flow_alloc(cookie);
-    if (!flow) {
-        return -ROCKER_ENOMEM;
-    }
 
     err = of_dpa_cmd_flow_add_mod(of_dpa, flow, flow_tlvs);
     if (err) {
@@ -2036,19 +2030,11 @@ static int of_dpa_cmd_add_l2_flood(OfDpa *of_dpa, OfDpaGroup *group,
     group->l2_flood.group_count =
         rocker_tlv_get_le16(group_tlvs[ROCKER_TLV_OF_DPA_GROUP_COUNT]);
 
-    tlvs = g_malloc0((group->l2_flood.group_count + 1) *
-                     sizeof(RockerTlv *));
-    if (!tlvs) {
-        return -ROCKER_ENOMEM;
-    }
+    tlvs = g_new0(RockerTlv *, group->l2_flood.group_count + 1);
 
     g_free(group->l2_flood.group_ids);
     group->l2_flood.group_ids =
-        g_malloc0(group->l2_flood.group_count * sizeof(uint32_t));
-    if (!group->l2_flood.group_ids) {
-        err = -ROCKER_ENOMEM;
-        goto err_out;
-    }
+        g_new0(uint32_t, group->l2_flood.group_count);
 
     rocker_tlv_parse_nested(tlvs, group->l2_flood.group_count,
                             group_tlvs[ROCKER_TLV_OF_DPA_GROUP_IDS]);
@@ -2155,9 +2141,6 @@ static int of_dpa_cmd_group_add(OfDpa *of_dpa, uint32_t group_id,
     }
 
     group = of_dpa_group_alloc(group_id);
-    if (!group) {
-        return -ROCKER_ENOMEM;
-    }
 
     err = of_dpa_cmd_group_do(of_dpa, group_id, group, group_tlvs);
     if (err) {
@@ -2302,7 +2285,316 @@ static void of_dpa_uninit(World *world)
     g_hash_table_destroy(of_dpa->flow_tbl);
 }
 
+struct of_dpa_flow_fill_context {
+    RockerOfDpaFlowList *list;
+    uint32_t tbl_id;
+};
+
+static void of_dpa_flow_fill(void *cookie, void *value, void *user_data)
+{
+    struct of_dpa_flow *flow = value;
+    struct of_dpa_flow_key *key = &flow->key;
+    struct of_dpa_flow_key *mask = &flow->mask;
+    struct of_dpa_flow_fill_context *flow_context = user_data;
+    RockerOfDpaFlowList *new;
+    RockerOfDpaFlow *nflow;
+    RockerOfDpaFlowKey *nkey;
+    RockerOfDpaFlowMask *nmask;
+    RockerOfDpaFlowAction *naction;
+
+    if (flow_context->tbl_id != -1 &&
+        flow_context->tbl_id != key->tbl_id) {
+        return;
+    }
+
+    new = g_malloc0(sizeof(*new));
+    nflow = new->value = g_malloc0(sizeof(*nflow));
+    nkey = nflow->key = g_malloc0(sizeof(*nkey));
+    nmask = nflow->mask = g_malloc0(sizeof(*nmask));
+    naction = nflow->action = g_malloc0(sizeof(*naction));
+
+    nflow->cookie = flow->cookie;
+    nflow->hits = flow->stats.hits;
+    nkey->priority = flow->priority;
+    nkey->tbl_id = key->tbl_id;
+
+    if (key->in_pport || mask->in_pport) {
+        nkey->has_in_pport = true;
+        nkey->in_pport = key->in_pport;
+    }
+
+    if (nkey->has_in_pport && mask->in_pport != 0xffffffff) {
+        nmask->has_in_pport = true;
+        nmask->in_pport = mask->in_pport;
+    }
+
+    if (key->eth.vlan_id || mask->eth.vlan_id) {
+        nkey->has_vlan_id = true;
+        nkey->vlan_id = ntohs(key->eth.vlan_id);
+    }
+
+    if (nkey->has_vlan_id && mask->eth.vlan_id != 0xffff) {
+        nmask->has_vlan_id = true;
+        nmask->vlan_id = ntohs(mask->eth.vlan_id);
+    }
+
+    if (key->tunnel_id || mask->tunnel_id) {
+        nkey->has_tunnel_id = true;
+        nkey->tunnel_id = key->tunnel_id;
+    }
+
+    if (nkey->has_tunnel_id && mask->tunnel_id != 0xffffffff) {
+        nmask->has_tunnel_id = true;
+        nmask->tunnel_id = mask->tunnel_id;
+    }
+
+    if (memcmp(key->eth.src.a, zero_mac.a, ETH_ALEN) ||
+        memcmp(mask->eth.src.a, zero_mac.a, ETH_ALEN)) {
+        nkey->has_eth_src = true;
+        nkey->eth_src = qemu_mac_strdup_printf(key->eth.src.a);
+    }
+
+    if (nkey->has_eth_src && memcmp(mask->eth.src.a, ff_mac.a, ETH_ALEN)) {
+        nmask->has_eth_src = true;
+        nmask->eth_src = qemu_mac_strdup_printf(mask->eth.src.a);
+    }
+
+    if (memcmp(key->eth.dst.a, zero_mac.a, ETH_ALEN) ||
+        memcmp(mask->eth.dst.a, zero_mac.a, ETH_ALEN)) {
+        nkey->has_eth_dst = true;
+        nkey->eth_dst = qemu_mac_strdup_printf(key->eth.dst.a);
+    }
+
+    if (nkey->has_eth_dst && memcmp(mask->eth.dst.a, ff_mac.a, ETH_ALEN)) {
+        nmask->has_eth_dst = true;
+        nmask->eth_dst = qemu_mac_strdup_printf(mask->eth.dst.a);
+    }
+
+    if (key->eth.type) {
+
+        nkey->has_eth_type = true;
+        nkey->eth_type = ntohs(key->eth.type);
+
+        switch (ntohs(key->eth.type)) {
+        case 0x0800:
+        case 0x86dd:
+            if (key->ip.proto || mask->ip.proto) {
+                nkey->has_ip_proto = true;
+                nkey->ip_proto = key->ip.proto;
+            }
+            if (nkey->has_ip_proto && mask->ip.proto != 0xff) {
+                nmask->has_ip_proto = true;
+                nmask->ip_proto = mask->ip.proto;
+            }
+            if (key->ip.tos || mask->ip.tos) {
+                nkey->has_ip_tos = true;
+                nkey->ip_tos = key->ip.tos;
+            }
+            if (nkey->has_ip_tos && mask->ip.tos != 0xff) {
+                nmask->has_ip_tos = true;
+                nmask->ip_tos = mask->ip.tos;
+            }
+            break;
+        }
+
+        switch (ntohs(key->eth.type)) {
+        case 0x0800:
+            if (key->ipv4.addr.dst || mask->ipv4.addr.dst) {
+                char *dst = inet_ntoa(*(struct in_addr *)&key->ipv4.addr.dst);
+                int dst_len = of_dpa_mask2prefix(mask->ipv4.addr.dst);
+                nkey->has_ip_dst = true;
+                nkey->ip_dst = g_strdup_printf("%s/%d", dst, dst_len);
+            }
+            break;
+        }
+    }
+
+    if (flow->action.goto_tbl) {
+        naction->has_goto_tbl = true;
+        naction->goto_tbl = flow->action.goto_tbl;
+    }
+
+    if (flow->action.write.group_id) {
+        naction->has_group_id = true;
+        naction->group_id = flow->action.write.group_id;
+    }
+
+    if (flow->action.apply.new_vlan_id) {
+        naction->has_new_vlan_id = true;
+        naction->new_vlan_id = flow->action.apply.new_vlan_id;
+    }
+
+    new->next = flow_context->list;
+    flow_context->list = new;
+}
+
+RockerOfDpaFlowList *qmp_query_rocker_of_dpa_flows(const char *name,
+                                                   bool has_tbl_id,
+                                                   uint32_t tbl_id,
+                                                   Error **errp)
+{
+    struct rocker *r;
+    struct world *w;
+    struct of_dpa *of_dpa;
+    struct of_dpa_flow_fill_context fill_context = {
+        .list = NULL,
+        .tbl_id = tbl_id,
+    };
+
+    r = rocker_find(name);
+    if (!r) {
+        error_setg(errp, "rocker %s not found", name);
+        return NULL;
+    }
+
+    w = rocker_get_world(r, ROCKER_WORLD_TYPE_OF_DPA);
+    if (!w) {
+        error_setg(errp, "rocker %s doesn't have OF-DPA world", name);
+        return NULL;
+    }
+
+    of_dpa = world_private(w);
+
+    g_hash_table_foreach(of_dpa->flow_tbl, of_dpa_flow_fill, &fill_context);
+
+    return fill_context.list;
+}
+
+struct of_dpa_group_fill_context {
+    RockerOfDpaGroupList *list;
+    uint8_t type;
+};
+
+static void of_dpa_group_fill(void *key, void *value, void *user_data)
+{
+    struct of_dpa_group *group = value;
+    struct of_dpa_group_fill_context *flow_context = user_data;
+    RockerOfDpaGroupList *new;
+    RockerOfDpaGroup *ngroup;
+    struct uint32List *id;
+    int i;
+
+    if (flow_context->type != 9 &&
+        flow_context->type != ROCKER_GROUP_TYPE_GET(group->id)) {
+        return;
+    }
+
+    new = g_malloc0(sizeof(*new));
+    ngroup = new->value = g_malloc0(sizeof(*ngroup));
+
+    ngroup->id = group->id;
+
+    ngroup->type = ROCKER_GROUP_TYPE_GET(group->id);
+
+    switch (ngroup->type) {
+    case ROCKER_OF_DPA_GROUP_TYPE_L2_INTERFACE:
+        ngroup->has_vlan_id = true;
+        ngroup->vlan_id = ROCKER_GROUP_VLAN_GET(group->id);
+        ngroup->has_pport = true;
+        ngroup->pport = ROCKER_GROUP_PORT_GET(group->id);
+        ngroup->has_out_pport = true;
+        ngroup->out_pport = group->l2_interface.out_pport;
+        ngroup->has_pop_vlan = true;
+        ngroup->pop_vlan = group->l2_interface.pop_vlan;
+        break;
+    case ROCKER_OF_DPA_GROUP_TYPE_L2_REWRITE:
+        ngroup->has_index = true;
+        ngroup->index = ROCKER_GROUP_INDEX_LONG_GET(group->id);
+        ngroup->has_group_id = true;
+        ngroup->group_id = group->l2_rewrite.group_id;
+        if (group->l2_rewrite.vlan_id) {
+            ngroup->has_set_vlan_id = true;
+            ngroup->set_vlan_id = ntohs(group->l2_rewrite.vlan_id);
+        }
+        if (memcmp(group->l2_rewrite.src_mac.a, zero_mac.a, ETH_ALEN)) {
+            ngroup->has_set_eth_src = true;
+            ngroup->set_eth_src =
+                qemu_mac_strdup_printf(group->l2_rewrite.src_mac.a);
+        }
+        if (memcmp(group->l2_rewrite.dst_mac.a, zero_mac.a, ETH_ALEN)) {
+            ngroup->has_set_eth_dst = true;
+            ngroup->set_eth_dst =
+                qemu_mac_strdup_printf(group->l2_rewrite.dst_mac.a);
+        }
+        break;
+    case ROCKER_OF_DPA_GROUP_TYPE_L2_FLOOD:
+    case ROCKER_OF_DPA_GROUP_TYPE_L2_MCAST:
+        ngroup->has_vlan_id = true;
+        ngroup->vlan_id = ROCKER_GROUP_VLAN_GET(group->id);
+        ngroup->has_index = true;
+        ngroup->index = ROCKER_GROUP_INDEX_GET(group->id);
+        for (i = 0; i < group->l2_flood.group_count; i++) {
+            ngroup->has_group_ids = true;
+            id = g_malloc0(sizeof(*id));
+            id->value = group->l2_flood.group_ids[i];
+            id->next = ngroup->group_ids;
+            ngroup->group_ids = id;
+        }
+        break;
+    case ROCKER_OF_DPA_GROUP_TYPE_L3_UCAST:
+        ngroup->has_index = true;
+        ngroup->index = ROCKER_GROUP_INDEX_LONG_GET(group->id);
+        ngroup->has_group_id = true;
+        ngroup->group_id = group->l3_unicast.group_id;
+        if (group->l3_unicast.vlan_id) {
+            ngroup->has_set_vlan_id = true;
+            ngroup->set_vlan_id = ntohs(group->l3_unicast.vlan_id);
+        }
+        if (memcmp(group->l3_unicast.src_mac.a, zero_mac.a, ETH_ALEN)) {
+            ngroup->has_set_eth_src = true;
+            ngroup->set_eth_src =
+                qemu_mac_strdup_printf(group->l3_unicast.src_mac.a);
+        }
+        if (memcmp(group->l3_unicast.dst_mac.a, zero_mac.a, ETH_ALEN)) {
+            ngroup->has_set_eth_dst = true;
+            ngroup->set_eth_dst =
+                qemu_mac_strdup_printf(group->l3_unicast.dst_mac.a);
+        }
+        if (group->l3_unicast.ttl_check) {
+            ngroup->has_ttl_check = true;
+            ngroup->ttl_check = group->l3_unicast.ttl_check;
+        }
+        break;
+    }
+
+    new->next = flow_context->list;
+    flow_context->list = new;
+}
+
+RockerOfDpaGroupList *qmp_query_rocker_of_dpa_groups(const char *name,
+                                                     bool has_type,
+                                                     uint8_t type,
+                                                     Error **errp)
+{
+    struct rocker *r;
+    struct world *w;
+    struct of_dpa *of_dpa;
+    struct of_dpa_group_fill_context fill_context = {
+        .list = NULL,
+        .type = type,
+    };
+
+    r = rocker_find(name);
+    if (!r) {
+        error_setg(errp, "rocker %s not found", name);
+        return NULL;
+    }
+
+    w = rocker_get_world(r, ROCKER_WORLD_TYPE_OF_DPA);
+    if (!w) {
+        error_setg(errp, "rocker %s doesn't have OF-DPA world", name);
+        return NULL;
+    }
+
+    of_dpa = world_private(w);
+
+    g_hash_table_foreach(of_dpa->group_tbl, of_dpa_group_fill, &fill_context);
+
+    return fill_context.list;
+}
+
 static WorldOps of_dpa_ops = {
+    .name = "ofdpa",
     .init = of_dpa_init,
     .uninit = of_dpa_uninit,
     .ig = of_dpa_ig,

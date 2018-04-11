@@ -7,11 +7,10 @@
  * See the COPYING file in the top-level directory.
  */
 
-#include <glib.h>
-#include <string.h>
+#include "qemu/osdep.h"
 #include "libqtest.h"
 #include "libqos/pci-pc.h"
-#include "qemu/osdep.h"
+#include "qemu/timer.h"
 #include "qemu-common.h"
 
 /* Tests only initialization so far. TODO: Replace with functional tests */
@@ -19,12 +18,11 @@ static void nop(void)
 {
 }
 
-#define CLK 33000000
-#define NS_PER_SEC 1000000000ULL
+#define CLK 33333333
 
 static QPCIBus *pcibus;
 static QPCIDevice *dev;
-static void *dev_base;
+static QPCIBar dev_bar;
 
 static void save_fn(QPCIDevice *dev, int devfn, void *data)
 {
@@ -37,7 +35,7 @@ static QPCIDevice *get_device(void)
 {
     QPCIDevice *dev;
 
-    pcibus = qpci_init_pc();
+    pcibus = qpci_init_pc(global_qtest, NULL);
     qpci_device_foreach(pcibus, 0x10ec, 0x8139, save_fn, &dev);
     g_assert(dev != NULL);
 
@@ -47,14 +45,14 @@ static QPCIDevice *get_device(void)
 #define PORT(name, len, val) \
 static unsigned __attribute__((unused)) in_##name(void) \
 { \
-    unsigned res = qpci_io_read##len(dev, dev_base+(val)); \
+    unsigned res = qpci_io_read##len(dev, dev_bar, (val));     \
     g_test_message("*%s -> %x\n", #name, res); \
     return res; \
 } \
 static void out_##name(unsigned v) \
 { \
     g_test_message("%x -> *%s\n", v, #name); \
-    qpci_io_write##len(dev, dev_base+(val), v); \
+    qpci_io_write##len(dev, dev_bar, (val), v);        \
 }
 
 PORT(Timer, l, 0x48)
@@ -86,7 +84,7 @@ static void test_timer(void)
         fatal("time too big %u\n", curr);
     }
     for (cnt = 0; ; ) {
-        clock_step(1 * NS_PER_SEC);
+        clock_step(1 * NANOSECONDS_PER_SECOND);
         prev = curr;
         curr = in_Timer();
 
@@ -125,7 +123,7 @@ static void test_timer(void)
     out_IntrStatus(0x4000);
     curr = in_Timer();
     out_TimerInt(curr + 0.5 * CLK);
-    clock_step(1 * NS_PER_SEC);
+    clock_step(1 * NANOSECONDS_PER_SECOND);
     out_Timer(0);
     if ((in_IntrStatus() & 0x4000) == 0) {
         fatal("we should have an interrupt here!\n");
@@ -137,7 +135,7 @@ static void test_timer(void)
     out_IntrStatus(0x4000);
     curr = in_Timer();
     out_TimerInt(curr + 0.5 * CLK);
-    clock_step(1 * NS_PER_SEC);
+    clock_step(1 * NANOSECONDS_PER_SECOND);
     out_TimerInt(0);
     if ((in_IntrStatus() & 0x4000) == 0) {
         fatal("we should have an interrupt here!\n");
@@ -148,7 +146,7 @@ static void test_timer(void)
     next = curr + 5.0 * CLK;
     out_TimerInt(next);
     for (cnt = 0; ; ) {
-        clock_step(1 * NS_PER_SEC);
+        clock_step(1 * NANOSECONDS_PER_SECOND);
         prev = curr;
         curr = in_Timer();
         diff = (curr-prev) & 0xffffffffu;
@@ -188,9 +186,7 @@ static void test_init(void)
 
     dev = get_device();
 
-    dev_base = qpci_iomap(dev, 0, &barsize);
-
-    g_assert(dev_base != NULL);
+    dev_bar = qpci_iomap(dev, 0, &barsize);
 
     qpci_device_enable(dev);
 
@@ -201,11 +197,12 @@ int main(int argc, char **argv)
 {
     int ret;
 
+    qtest_start("-device rtl8139");
+
     g_test_init(&argc, &argv, NULL);
     qtest_add_func("/rtl8139/nop", nop);
     qtest_add_func("/rtl8139/timer", test_init);
 
-    qtest_start("-device rtl8139");
     ret = g_test_run();
 
     qtest_end();
