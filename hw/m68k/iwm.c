@@ -2,7 +2,13 @@
  * Integrated Woz Machine (IWM) chip for disk control
  */
 
+#include "qemu/osdep.h"
+#include "qemu-common.h"
+#include "qapi/error.h"
+#include "cpu.h"
 #include "hw/hw.h"
+#include "qemu/timer.h"
+#include "qemu/log.h"
 #include "mac128k.h"
 #include "sy6522.h"
 

@@ -1,10 +1,13 @@
-#ifndef MAC_FD_IO
-
+#include "qemu/osdep.h"
+#include "qemu-common.h"
+#include "qapi/error.h"
+#include "cpu.h"
 #include "hw/hw.h"
 #include "mac_fd.h"
 #include "hw/m68k/mac128k.h"
 #include "sysemu/block-backend.h"
 #include "hw/qdev.h"
+#include "qemu/log.h"
 
 #define TYPE_MAC_FD "mac_fd"
 
@@ -23,7 +26,7 @@ void mac_fd_read(int blk_offset, int buf_offset, int blk_count)
 {
     void *ptr = mac_get_ram_ptr();
     if (MAC_FDState->blk) {
-        if (blk_read(MAC_FDState->blk, blk_offset, ptr + buf_offset, blk_count) < 0) {
+        if (blk_pread(MAC_FDState->blk, blk_offset, ptr + buf_offset, blk_count) < 0) {
             qemu_log("Error: mac_fd read error\n");
             exit(-1);
         }
@@ -35,7 +38,7 @@ void mac_fd_write(int blk_offset, int buf_offset, int blk_count)
 {
     void *ptr = mac_get_ram_ptr();
     if (MAC_FDState->blk) {
-        if (blk_write(MAC_FDState->blk, blk_offset, ptr + buf_offset, blk_count) < 0) {
+        if (blk_pwrite(MAC_FDState->blk, blk_offset, ptr + buf_offset, blk_count, 0) < 0) {
             qemu_log("Error: mac_fd write error\n");
             exit(-1);
         }
@@ -102,5 +105,3 @@ static void mac_fd_register_types(void)
 }
 
 type_init(mac_fd_register_types)
-
-#endif  /* MAC_FD_IO */

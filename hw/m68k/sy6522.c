@@ -7,9 +7,15 @@
  *
  * This code is licensed under the GPL
  */
+#include "qemu/osdep.h"
+#include "qemu-common.h"
+#include "qapi/error.h"
+#include "cpu.h"
 #include "hw/hw.h"
 #include "qemu/timer.h"
+#include "qemu/log.h"
 #include "exec/address-spaces.h"
+#include "exec/exec-all.h"
 #include "mac128k.h"
 #include "sysemu/sysemu.h"
 #include "hw/irq.h"
@@ -162,7 +168,7 @@ static void via_set_reg_vBufA(via_state *s, uint8_t val)
             memory_region_del_subregion(get_system_memory(), &s->ram);
             qemu_log("via: Unmap ROM from 0x0\n");
         }
-        tlb_flush(CPU(s->cpu), 1);
+        tlb_flush(CPU(s->cpu));
     }
 
     if ((old & REGA_SEL_MASK) != (val & REGA_SEL_MASK)) {

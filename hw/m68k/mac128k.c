@@ -4,6 +4,10 @@
  * This code is licensed under the GPL
  */
 
+#include "qemu/osdep.h"
+#include "qemu-common.h"
+#include "qapi/error.h"
+#include "cpu.h"
 #include "hw/hw.h"
 #include "mac128k.h"
 #include "hw/boards.h"
@@ -54,7 +58,7 @@ static drawfn draw_line_table[33] = {
 
 static MemoryRegion *ram;
 
-void *mac_get_ram_ptr(void)
+uint8_t *mac_get_ram_ptr(void)
 {
     return memory_region_get_ram_ptr(ram);
 }
@@ -73,7 +77,7 @@ static void mac_update_display(void *opaque)
 
     drawfn draw_line = draw_line_table[surface_bits_per_pixel(surface)];
     dest = surface_data(surface);
-    src = qemu_get_ram_ptr(0x1a700);
+    src = mac_get_ram_ptr() + 0x1a700;
     for (line = 0 ; line < SCREEN_HEIGHT ; ++line) {
         draw_line(dest, src, SCREEN_WIDTH);
         dest += surface_stride(surface);
@@ -100,7 +104,6 @@ static void mac128k_init(MachineState *machine)
 {
     ram_addr_t ram_size = 0x20000;//machine->ram_size;
     hwaddr ramOffset;
-    const char *cpu_model = machine->cpu_model;
     const char *kernel_filename = machine->kernel_filename;
     M68kCPU *cpu;
     int kernel_size;
@@ -112,11 +115,7 @@ static void mac128k_init(MachineState *machine)
     sound_generator_state *snd_st;
     mac_display *display = (mac_display *)g_malloc0(sizeof(mac_display));
 
-    if (!cpu_model) {
-        cpu_model = "m68000";
-    }
-
-    cpu = cpu_m68k_init(cpu_model);
+    cpu = M68K_CPU(cpu_create(machine->cpu_type));
     if (!cpu) {
         hw_error("Unable to find m68k CPU definition\n");
     }
@@ -156,7 +155,7 @@ static void mac128k_init(MachineState *machine)
     }
 
     /* ROM */
-    memory_region_init_ram(rom, NULL, "mac128k.rom", MAX_ROM_SIZE, &error_abort);
+    memory_region_init_ram(rom, NULL, "mac128k.rom", MAX_ROM_SIZE, &error_fatal);
     memory_region_add_subregion(address_space_mem, ROM_LOAD_ADDR, rom);
     memory_region_set_readonly(rom, true);
 
@@ -183,15 +182,11 @@ static void mac128k_init(MachineState *machine)
     }
 }
 
-static QEMUMachine mac128k_machine = {
-    .name = "mac128k",
-    .desc = "Macintosh 128K",
-    .init = mac128k_init,
-};
-
-static void mac128k_machine_init(void)
+static void m128k_machine_init(MachineClass *mc)
 {
-    qemu_register_machine(&mac128k_machine);
+    mc->desc = "Macintosh 128k";
+    mc->init = mac128k_init;
+    mc->default_cpu_type = M68K_CPU_TYPE_NAME("m68000");
 }
 
-machine_init(mac128k_machine_init);
+DEFINE_MACHINE("mac128k", m128k_machine_init)

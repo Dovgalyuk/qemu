@@ -1,5 +1,7 @@
+#include "qemu/osdep.h"
 #include "hw/irq.h"
 #include "sysemu/sysemu.h"
+#include "qemu/log.h"
 #include "sy6522.h"
 #include "mac_rtc.h"
 
@@ -105,7 +107,8 @@ void rtc_param_reset(rtc_state *rtc)
 static void rtc_interrupt(void * opaque)
 {
     rtc_state *rtc = opaque;
-    timer_mod_ns(rtc->timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + get_ticks_per_sec());
+    timer_mod_ns(rtc->timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL)
+             + NANOSECONDS_PER_SECOND);
 
     if (rtc->buf_RAM[0] == 0xFF) {
         if (rtc->buf_RAM[1] == 0xFF) {
@@ -123,14 +126,16 @@ static void rtc_interrupt(void * opaque)
 
 static void rtc_reset(rtc_state *rtc)
 {
-    uint64_t now = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) / get_ticks_per_sec()
+    uint64_t now = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL)
+                        / NANOSECONDS_PER_SECOND
                  + HOST_TO_MAC_RTC;
     uint8_t i;
     for (i = 0; i < 4; ++i) {
         rtc->buf_RAM[i] = (now >> (8 * i)) & 0xFF;
     }
     rtc->buf_RAM[13] = 0x80;
-    timer_mod_ns(rtc->timer, now + get_ticks_per_sec());
+    timer_mod_ns(rtc->timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL)
+             + NANOSECONDS_PER_SECOND);
 }
 
 rtc_state *rtc_init(qemu_irq irq)

@@ -1,4 +1,7 @@
+#include "qemu/osdep.h"
 #include "hw/hw.h"
+#include "cpu.h"
+#include "qemu/log.h"
 #include "mac_int_control.h"
 
 typedef struct int_state {

@@ -1,4 +1,8 @@
+#include "qemu/osdep.h"
+#include "qemu-common.h"
 #include "hw/hw.h"
+#include "qemu/timer.h"
+#include "qemu/log.h"
 #include "exec/address-spaces.h"
 #include "hw/irq.h"
 #include "ui/input.h"
@@ -50,9 +54,10 @@ static void keyboard_event(DeviceState *dev, QemuConsole *src,
 {
     keyboard_state *s = (keyboard_state *)dev;
     int scancodes[3], count;
+    InputKeyEvent *key = evt->u.key.data;
 
-    count = qemu_input_key_value_to_scancode(evt->key->key,
-                                             evt->key->down,
+    count = qemu_input_key_value_to_scancode(key->key,
+                                             key->down,
                                              scancodes);
     timer_del(s->timer);
     if (s->cmd == 0x10 || s->cmd == 0x14) {
@@ -87,7 +92,8 @@ void keyboard_handle_cmd(keyboard_state *s)
         case 0x10:
             /* Inquiry */
             if (s->model_number_flag) {
-                timer_mod_ns(s->timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + get_ticks_per_sec() / 4);
+                timer_mod_ns(s->timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL)
+                    + NANOSECONDS_PER_SECOND / 4);
             }
             break;
         case 0x14:

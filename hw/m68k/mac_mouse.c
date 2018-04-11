@@ -1,7 +1,10 @@
+#include "qemu/osdep.h"
 #include "hw/hw.h"
 #include "exec/address-spaces.h"
 #include "hw/irq.h"
 #include "ui/input.h"
+#include "qemu/log.h"
+#include "qemu/timer.h"
 #include "sy6522.h"
 #include "z8530.h"
 #include "mac_mouse.h"
@@ -29,30 +32,36 @@ static void mac_mouse_event(DeviceState *dev, QemuConsole *src,
                                InputEvent *evt)
 {
     mouse_state *s = (mouse_state *)dev;
+    InputBtnEvent *btn;
+    InputMoveEvent *move;
 
-    switch (evt->kind) {
+    switch (evt->type) {
     case INPUT_EVENT_KIND_REL:
-        if (evt->rel->axis == INPUT_AXIS_X) {
-            if (evt->rel->value == 0) {
+        move = evt->u.rel.data;
+        if (move->axis == INPUT_AXIS_X) {
+            if (move->value == 0) {
                 break;
             }
-            s->mouse_dx += evt->rel->value;                     
+            s->mouse_dx += move->value;                     
             if (abs(s->mouse_dx) > MOUSE_LIMIT-1) {
-                timer_mod_ns(s->timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + FREQUENCY);                
+                timer_mod_ns(s->timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL)
+                     + FREQUENCY);                
             }
-        } else if (evt->rel->axis == INPUT_AXIS_Y) {
-            if (evt->rel->value == 0) {
+        } else if (move->axis == INPUT_AXIS_Y) {
+            if (move->value == 0) {
                 break;
             }
-            s->mouse_dy -= evt->rel->value;            
+            s->mouse_dy -= move->value;            
             if (abs(s->mouse_dy) > MOUSE_LIMIT-1) {
-                timer_mod_ns(s->timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + FREQUENCY);            
+                timer_mod_ns(s->timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL)
+                    + FREQUENCY);
             }        
         }
         break;
 
     case INPUT_EVENT_KIND_BTN:
-        if (evt->btn->down) {
+        btn = evt->u.btn.data;
+        if (btn->down) {
             qemu_log("mouse: button down\n");
             via_set_reg(s->via, vBufB, via_get_reg(s->via, vBufB) & 0xf7);
         } else {

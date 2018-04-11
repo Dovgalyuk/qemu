@@ -1,7 +1,11 @@
+#include "qemu/osdep.h"
 #include "hw/hw.h"
+#include "cpu.h"
+#include "qemu/log.h"
 #include "exec/address-spaces.h"
 #include "audio/audio.h"
 #include "exec/ram_addr.h"
+#include "mac128k.h"
 #include <math.h>
 
 #include "mac_sound_generator.h"
@@ -23,7 +27,7 @@ static inline void convert_mem_buf(sound_generator_state *s)
     uint32_t i;
     uint8_t *src;
 
-    src = qemu_get_ram_ptr(s->current_memory);
+    src = mac_get_ram_ptr() + s->current_memory;
 
     for (i = 0; i < BUF_SIZE; i++, src+=2) {
         s->sample_buf[i] = (uint16_t)(32768-32768*(*src)/255.0);
