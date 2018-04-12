@@ -22,6 +22,7 @@
 #include "exec/exec-all.h"
 #include "exec/cpu_ldst.h"
 #include "exec/semihost.h"
+#include "hw/block/mac_fd.h"
 
 #if defined(CONFIG_USER_ONLY)
 
@@ -1100,5 +1101,111 @@ void HELPER(chk2)(CPUM68KState *env, int32_t val, int32_t lb, int32_t ub)
 
         cs->exception_index = EXCP_CHK;
         cpu_loop_exit(cs);
+    }
+}
+
+enum ioParams {
+    ioCompletion = 12,
+    ioResult     = 16,
+    ioVRefNum    = 22,
+    ioRefNum     = 24,
+    ioBuffer     = 32,
+    ioReqCount   = 36,
+    ioActCount   = 40,
+    ioPosMode    = 44,
+    ioPosOffset  = 46
+};
+
+enum resultCodes {
+    noErr    =  0,
+    eofErr   = -39,
+    extFSErr = -58,
+    fnOpnErr = -38,
+    ioErr    = -36,
+    paramErr = -50,
+    rfNumErr = -51
+};
+
+void HELPER(read_disk)(CPUM68KState *env, uint32_t tt)
+{
+    int ReqCount = cpu_ldl_kernel(env, env->aregs[0] + ioReqCount);
+    int ActCount = 0;
+    int Buffer = cpu_ldl_kernel(env, env->aregs[0] + ioBuffer);
+    int PosOffset = cpu_ldl_kernel(env, env->aregs[0] + ioPosOffset);
+    int Completion = cpu_ldl_kernel(env, env->aregs[0] + ioCompletion);
+    int Result = noErr;
+
+    env->cc_op = CC_OP_FLAGS;
+
+    qemu_log("mac_read at 0x%x refnum=%x\n", env->pc, cpu_lduw_kernel(env, env->aregs[0] + ioRefNum));
+
+    // printf("ioCompletion = %x\n"
+    //        "ioBuffer     = %x\n"
+    //        "ioReqCount   = %i\n"
+    //        "ioPosOffset  = %i\n\n",
+    //        Completion, Buffer, ReqCount, PosOffset);
+
+    if (cpu_lduw_kernel(env, env->aregs[0] + ioRefNum) != 0xfffb) {
+        qemu_log("mac_read: raise_exception\n");
+        raise_exception_ra(env, tt, GETPC());
+    } else {
+        mac_fd_read(PosOffset / BLOCK_SIZE, Buffer, ReqCount / BLOCK_SIZE);
+        ActCount = ReqCount;
+
+        cpu_stl_kernel(env, env->aregs[0] + ioPosOffset, ActCount + PosOffset);
+        cpu_stl_kernel(env, env->aregs[0] + ioActCount,  ActCount);
+        cpu_stl_kernel(env, env->aregs[0] + ioResult,    Result);
+        env->dregs[0] = Result;
+
+        if (Completion) {
+            //cs->exception_index = EXCP_TRAP0;
+            //do_interrupt_all(env, false);
+            //env->pc = 0x401116;
+            env->pc = Completion;
+        } else {
+            env->pc = env->pc + 2;
+        }
+    }
+}
+
+void HELPER(write_disk)(CPUM68KState *env, uint32_t tt)
+{
+    int ReqCount = cpu_ldl_kernel(env, env->aregs[0] + ioReqCount);
+    int ActCount = 0;
+    int Buffer = cpu_ldl_kernel(env, env->aregs[0] + ioBuffer);
+    int PosOffset = cpu_ldl_kernel(env, env->aregs[0] + ioPosOffset);
+    int Completion = cpu_ldl_kernel(env, env->aregs[0] + ioCompletion);
+    int Result = noErr;
+
+    env->cc_op = CC_OP_FLAGS;
+
+    qemu_log("mac_write at 0x%x refnum=%x\n", env->pc, cpu_lduw_kernel(env, env->aregs[0] + ioRefNum));
+
+    // printf("ioCompletion = %x\n"
+    //        "ioBuffer     = %x\n"
+    //        "ioReqCount   = %i\n"
+    //        "ioPosOffset  = %i\n\n",
+    //        Completion, Buffer, ReqCount, PosOffset);
+
+    if (cpu_lduw_kernel(env, env->aregs[0] + ioRefNum) != 0xfffb) {
+        qemu_log("mac_write: raise_exception\n");
+        raise_exception_ra(env, tt, GETPC());
+    } else {
+        mac_fd_write(PosOffset / BLOCK_SIZE, Buffer, ReqCount / BLOCK_SIZE);
+        ActCount = ReqCount;
+
+        cpu_stl_kernel(env, env->aregs[0] + ioPosOffset, ActCount + PosOffset);
+        cpu_stl_kernel(env, env->aregs[0] + ioActCount,  ActCount);
+        cpu_stl_kernel(env, env->aregs[0] + ioResult,    Result);
+        env->dregs[0] = Result;
+
+        if (Completion) {
+            //cs->exception_index = EXCP_TRAP0;
+            //do_interrupt_all(env, false);
+            //env->pc = 0x401116;
+            env->pc = Completion;
+        } else {
+            env->pc = env->pc + 2;
+        }
     }
 }

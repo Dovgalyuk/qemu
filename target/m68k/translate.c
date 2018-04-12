@@ -1546,6 +1546,20 @@ DISAS_INSN(undef_mac)
     gen_exception(s, s->insn_pc, EXCP_LINEA);
 }
 
+DISAS_INSN(mac_read)
+{
+    update_cc_op(s);
+    gen_jmp_im(s, s->insn_pc - 2);
+    gen_helper_read_disk(cpu_env, tcg_const_i32(EXCP_LINEA));
+}
+
+DISAS_INSN(mac_write)
+{
+    update_cc_op(s);
+    gen_jmp_im(s, s->insn_pc - 2);
+    gen_helper_write_disk(cpu_env, tcg_const_i32(EXCP_LINEA));
+}
+
 DISAS_INSN(undef_fpu)
 {
     gen_exception(s, s->insn_pc, EXCP_LINEF);
@@ -5962,8 +5976,12 @@ void register_m68k_insns (CPUM68KState *env)
 
     BASE(undef_mac, a000, f000);
     INSN(mac,       a000, f100, CF_EMAC);
+    INSN(mac_read,  a002, ffff, M68000);
+    INSN(mac_write, a003, ffff, M68000);
     INSN(from_mac,  a180, f9b0, CF_EMAC);
     INSN(move_mac,  a110, f9fc, CF_EMAC);
+    INSN(mac_read,  a402, ffff, M68000);
+    INSN(mac_write, a403, ffff, M68000);
     INSN(from_macsr,a980, f9f0, CF_EMAC);
     INSN(from_mask, ad80, fff0, CF_EMAC);
     INSN(from_mext, ab80, fbf0, CF_EMAC);
