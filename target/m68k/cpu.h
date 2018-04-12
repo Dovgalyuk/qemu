@@ -40,6 +40,7 @@
 
 #define MAX_QREGS 32
 
+#define EXCP_RESET          1   /* Reset */
 #define EXCP_ACCESS         2   /* Access (MMU) error.  */
 #define EXCP_ADDRESS        3   /* Address error.  */
 #define EXCP_ILLEGAL        4   /* Illegal instruction.  */

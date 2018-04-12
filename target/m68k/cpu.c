@@ -66,8 +66,14 @@ static void m68k_cpu_reset(CPUState *s)
     cpu_m68k_set_fpcr(env, 0);
     env->fpsr = 0;
 
-    /* TODO: We should set PC from the interrupt vector.  */
+    env->cc_op = CC_OP_FLAGS;
     env->pc = 0;
+    env->vbr = 0;
+    /* Exception handler will read starting PC  
+       after resetting all devices */
+    s->exception_index = EXCP_RESET;
+
+    tlb_flush(s);
 }
 
 static void m68k_cpu_disas_set_info(CPUState *s, disassemble_info *info)

@@ -251,33 +251,37 @@ static void cf_interrupt_all(CPUM68KState *env, int is_hw)
 
     vector = cs->exception_index << 2;
 
-    sr = env->sr | cpu_m68k_get_ccr(env);
-    if (qemu_loglevel_mask(CPU_LOG_INT)) {
-        static int count;
-        qemu_log("INT %6d: %s(%#x) pc=%08x sp=%08x sr=%04x\n",
-                 ++count, m68k_exception_name(cs->exception_index),
-                 vector, env->pc, env->aregs[7], sr);
+    if (cs->exception_index != EXCP_RESET) {
+        sr = env->sr | cpu_m68k_get_ccr(env);
+        if (qemu_loglevel_mask(CPU_LOG_INT)) {
+            static int count;
+            qemu_log("INT %6d: %s(%#x) pc=%08x sp=%08x sr=%04x\n",
+                     ++count, m68k_exception_name(cs->exception_index),
+                     vector, env->pc, env->aregs[7], sr);
+        }
+
+        fmt |= 0x40000000;
+        fmt |= vector << 16;
+        fmt |= sr;
+
+        env->sr |= SR_S;
+        if (is_hw) {
+            env->sr = (env->sr & ~SR_I) | (env->pending_level << SR_I_SHIFT);
+            env->sr &= ~SR_M;
+        }
+        m68k_switch_sp(env);
+        sp = env->aregs[7];
+        fmt |= (sp & 3) << 28;
+
+        /* ??? This could cause MMU faults.  */
+        sp &= ~3;
+        sp -= 4;
+        cpu_stl_kernel(env, sp, retaddr);
+        sp -= 4;
+        cpu_stl_kernel(env, sp, fmt);
+    } else {
+        sp = cpu_ldl_kernel(env, env->vbr + vector - 4);
     }
-
-    fmt |= 0x40000000;
-    fmt |= vector << 16;
-    fmt |= sr;
-
-    env->sr |= SR_S;
-    if (is_hw) {
-        env->sr = (env->sr & ~SR_I) | (env->pending_level << SR_I_SHIFT);
-        env->sr &= ~SR_M;
-    }
-    m68k_switch_sp(env);
-    sp = env->aregs[7];
-    fmt |= (sp & 3) << 28;
-
-    /* ??? This could cause MMU faults.  */
-    sp &= ~3;
-    sp -= 4;
-    cpu_stl_kernel(env, sp, retaddr);
-    sp -= 4;
-    cpu_stl_kernel(env, sp, fmt);
     env->aregs[7] = sp;
     /* Jump to vector.  */
     env->pc = cpu_ldl_kernel(env, env->vbr + vector);
