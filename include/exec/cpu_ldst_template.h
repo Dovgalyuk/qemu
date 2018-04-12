@@ -93,7 +93,7 @@ glue(glue(glue(cpu_ld, USUFFIX), MEMSUFFIX), _ra)(CPUArchState *env,
         trace_mem_build_info(SHIFT, false, MO_TE, false));
 #endif
 
-    addr = ptr;
+    addr = ptr & TARGET_ADDR_MASK;
     page_index = (addr >> TARGET_PAGE_BITS) & (CPU_TLB_SIZE - 1);
     mmu_idx = CPU_MMU_INDEX;
     if (unlikely(env->tlb_table[mmu_idx][page_index].ADDR_READ !=
@@ -131,7 +131,7 @@ glue(glue(glue(cpu_lds, SUFFIX), MEMSUFFIX), _ra)(CPUArchState *env,
         trace_mem_build_info(SHIFT, true, MO_TE, false));
 #endif
 
-    addr = ptr;
+    addr = ptr & TARGET_ADDR_MASK;
     page_index = (addr >> TARGET_PAGE_BITS) & (CPU_TLB_SIZE - 1);
     mmu_idx = CPU_MMU_INDEX;
     if (unlikely(env->tlb_table[mmu_idx][page_index].ADDR_READ !=
@@ -173,7 +173,7 @@ glue(glue(glue(cpu_st, SUFFIX), MEMSUFFIX), _ra)(CPUArchState *env,
         trace_mem_build_info(SHIFT, false, MO_TE, true));
 #endif
 
-    addr = ptr;
+    addr = ptr & TARGET_ADDR_MASK;
     page_index = (addr >> TARGET_PAGE_BITS) & (CPU_TLB_SIZE - 1);
     mmu_idx = CPU_MMU_INDEX;
     if (unlikely(env->tlb_table[mmu_idx][page_index].addr_write !=

@@ -135,6 +135,7 @@ static void mac128k_init(MachineState *machine)
         } } while(0)
 
     MAP_RAM_LOOP(ram_size, 0);
+#if 0
     /* HACK: RAM mirroring for unused address bits 28-31 
        TODO: bits 24-27 are still not mapped
        TODO: ROM and RAM should switch with overlay
@@ -144,6 +145,7 @@ static void mac128k_init(MachineState *machine)
         MAP_RAM_LOOP(0, high * 0x10000000UL);
     }
 #undef MAP_RAM_LOOP
+#endif
     /* RAM mirroring for overlay (address wrap) */
     for (ramOffset = ram_size ; ramOffset <= 0x800000 - ram_size
          ; ramOffset += ram_size)

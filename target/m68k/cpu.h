@@ -22,6 +22,9 @@
 #define M68K_CPU_H
 
 #define TARGET_LONG_BITS 32
+/* Macintosh 128k only */
+#define TARGET_ADDR_BITS 24
+#define TARGET_ADDR_MASK 0x00ffffff
 
 #define CPUArchState struct CPUM68KState
 
