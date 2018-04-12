@@ -1104,6 +1104,8 @@ void HELPER(chk2)(CPUM68KState *env, int32_t val, int32_t lb, int32_t ub)
     }
 }
 
+#ifndef CONFIG_USER_ONLY
+
 enum ioParams {
     ioCompletion = 12,
     ioResult     = 16,
@@ -1209,3 +1211,5 @@ void HELPER(write_disk)(CPUM68KState *env, uint32_t tt)
         }
     }
 }
+
+#endif
