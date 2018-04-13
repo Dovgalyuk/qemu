@@ -2594,10 +2594,10 @@ static void gen_ldst_i32(TCGOpcode opc, TCGv_i32 val, TCGv addr,
 #ifdef TARGET_ADDR_MASK
     TCGv_i32 t0 = tcg_const_i32(TARGET_ADDR_MASK);
     tcg_gen_and_i32(t0, addr, t0);
-#endif
     tcg_gen_op3i_i32(opc, val, t0, oi);
-#ifdef TARGET_ADDR_MASK
     tcg_temp_free_i32(t0);
+#else
+    tcg_gen_op3i_i32(opc, val, addr, oi);
 #endif
 #else
     if (TCG_TARGET_REG_BITS == 32) {
