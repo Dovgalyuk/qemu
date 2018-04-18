@@ -117,10 +117,14 @@ typedef struct Z8530State {
 #define IVEC_LORXINTA  0x0c
 #define IVEC_LORXINTB  0x04
 #define IVEC_LOTXINTA  0x08
+#define IVEC_LOEXTINTB 0x02
+#define IVEC_LOEXTINTA 0x0a
 #define IVEC_HINOINT   0x60
 #define IVEC_HIRXINTA  0x30
 #define IVEC_HIRXINTB  0x20
 #define IVEC_HITXINTA  0x10
+#define IVEC_HIEXTINTB 0x40
+#define IVEC_HIEXTINTA 0x50
 #define R_INTR    3
 #define INTR_EXTINTB   0x01
 #define INTR_TXINTB    0x02
@@ -289,11 +293,17 @@ void mouse_interrupt(void * opaque, uint8_t chn_id)
 
     if (s->chn[chn_id].wregs[W_EXTINT] & EXTINT_DCD) {
         if (chn_id == chn_a) {
-            s->chn[0].rregs[R_IVEC] = 0x0a;
-            s->chn[1].rregs[R_IVEC] = 0x0a;
+            s->chn[0].rregs[R_INTR] |= INTR_EXTINTA;
+            if (s->chn[0].wregs[W_MINTR] & MINTR_STATUSHI)
+                s->chn[1].rregs[R_IVEC] = IVEC_HIEXTINTA;
+            else
+                s->chn[1].rregs[R_IVEC] = IVEC_LOEXTINTA;
         } else {
-            s->chn[0].rregs[R_IVEC] = 0x02;
-            s->chn[1].rregs[R_IVEC] = 0x02;            
+            s->chn[0].rregs[R_INTR] |= INTR_EXTINTB;
+            if (s->chn[0].wregs[W_MINTR] & MINTR_STATUSHI)
+                s->chn[1].rregs[R_IVEC] = IVEC_HIEXTINTB;
+            else
+                s->chn[1].rregs[R_IVEC] = IVEC_LOEXTINTB;
         }
         set_hw_irq(s->cpu, s->int_st, 1, 0x68 >> 2);
     } else {

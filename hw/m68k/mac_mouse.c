@@ -9,15 +9,15 @@
 #include "z8530.h"
 #include "mac_mouse.h"
 
-#define FREQUENCY 16625800LL
+#define FREQUENCY 300000LL
 #define MOUSE_LIMIT 3
 
 typedef struct mouse_state {
     QEMUTimer *timer;
     via_state *via;
     Z8530State *z8530;
-    int32_t mouse_dx;
-    int32_t mouse_dy;
+    int32_t dx, curr_dx;
+    int32_t dy, curr_dy;
 } mouse_state;
 
 static void mac_mouse_event(DeviceState *dev, QemuConsole *src, InputEvent *evt);
@@ -42,8 +42,8 @@ static void mac_mouse_event(DeviceState *dev, QemuConsole *src,
             if (move->value == 0) {
                 break;
             }
-            s->mouse_dx += move->value;                     
-            if (abs(s->mouse_dx) > MOUSE_LIMIT-1) {
+            s->dx += move->value;                     
+            if (abs(s->dx - s->curr_dx) > MOUSE_LIMIT-1) {
                 timer_mod_ns(s->timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL)
                      + FREQUENCY);                
             }
@@ -51,8 +51,8 @@ static void mac_mouse_event(DeviceState *dev, QemuConsole *src,
             if (move->value == 0) {
                 break;
             }
-            s->mouse_dy -= move->value;            
-            if (abs(s->mouse_dy) > MOUSE_LIMIT-1) {
+            s->dy -= move->value;            
+            if (abs(s->dy - s->curr_dy) > MOUSE_LIMIT-1) {
                 timer_mod_ns(s->timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL)
                     + FREQUENCY);
             }        
@@ -81,51 +81,56 @@ static void timer_callback(void *opaque)
     mouse_state *s = opaque;
     uint8_t dcd;
 
-    if (abs(s->mouse_dx) > MOUSE_LIMIT-1) {
+    if (abs(s->dx - s->curr_dx) < MOUSE_LIMIT) {
+        s->dx = s->curr_dx = 0;
+    }
+    if (abs(s->dy - s->curr_dy) < MOUSE_LIMIT) {
+        s->dy = s->curr_dy = 0;
+    }
+
+    if (abs(s->dx - s->curr_dx) > MOUSE_LIMIT - 1
+        && abs(s->dy * s->curr_dx) <= abs(s->dx * s->curr_dy)) {
         dcd = z8530_get_reg(s->z8530, 0, 0);
         z8530_set_reg(s->z8530, 0, 0, dcd ^ 0x08);
-        if (s->mouse_dx > 0) {
+        if (s->dx - s->curr_dx > 0) {
             if ((dcd & 0x08) == 0) {
                 via_set_reg(s->via, vBufB, via_get_reg(s->via, vBufB) & 0xef);
-            }
-            if ((dcd & 0x08) == 0x08) {
+            } else {
                 via_set_reg(s->via, vBufB, via_get_reg(s->via, vBufB) | 0x10);
             }
-            s->mouse_dx-= MOUSE_LIMIT;
+            s->curr_dx += MOUSE_LIMIT;
         } else {
             if ((dcd & 0x08) == 0) {
                 via_set_reg(s->via, vBufB, via_get_reg(s->via, vBufB) | 0x10);
-            }
-            if ((dcd & 0x08) == 0x08) {
+            } else {
                 via_set_reg(s->via, vBufB, via_get_reg(s->via, vBufB) & 0xef);
             }
-            s->mouse_dx+= MOUSE_LIMIT;
+            s->curr_dx -= MOUSE_LIMIT;
         } 
         mouse_interrupt(s->z8530, 0);
-    } else if (abs(s->mouse_dy) > MOUSE_LIMIT-1) {
+    } else if (abs(s->dy - s->curr_dy) > MOUSE_LIMIT-1) {
         dcd = z8530_get_reg(s->z8530, 1, 0);
         z8530_set_reg(s->z8530, 1, 0, dcd ^ 0x08);
-        if (s->mouse_dy > 0) {
+        if (s->dy - s->curr_dy > 0) {
             if ((dcd & 0x08) == 0) {
                 via_set_reg(s->via, vBufB, via_get_reg(s->via, vBufB) & 0xdf);
-            }
-            if ((dcd & 0x08) == 0x08) {
+            } else {
                 via_set_reg(s->via, vBufB, via_get_reg(s->via, vBufB) | 0x20);
             }
-            s->mouse_dy-= MOUSE_LIMIT;
+            s->curr_dy += MOUSE_LIMIT;
         } else {
             if ((dcd & 0x08) == 0) {
                 via_set_reg(s->via, vBufB, via_get_reg(s->via, vBufB) | 0x20);
-            }
-            if ((dcd & 0x08) == 0x08) {
+            } else {
                 via_set_reg(s->via, vBufB, via_get_reg(s->via, vBufB) & 0xdf);
             }
-            s->mouse_dy+= MOUSE_LIMIT;
+            s->curr_dy -= MOUSE_LIMIT;
         } 
         mouse_interrupt(s->z8530, 1);
     }
 
-    if ((abs(s->mouse_dx) > MOUSE_LIMIT-1) || (abs(s->mouse_dy) > MOUSE_LIMIT-1)) {
+    if ((abs(s->dx - s->curr_dx) > MOUSE_LIMIT-1)
+        || (abs(s->dy - s->curr_dy) > MOUSE_LIMIT-1)) {
         timer_mod_ns(s->timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + FREQUENCY);
     }
 }
