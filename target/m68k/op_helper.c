@@ -1161,6 +1161,10 @@ void HELPER(read_disk)(CPUM68KState *env, uint32_t tt)
         cpu_stl_kernel(env, env->aregs[0] + ioActCount,  ActCount);
         cpu_stl_kernel(env, env->aregs[0] + ioResult,    Result);
         env->dregs[0] = Result;
+        env->cc_n = Result;
+        env->cc_z = env->cc_n;
+        env->cc_c = 0;
+        env->cc_v = 0;
 
         if (Completion) {
             //cs->exception_index = EXCP_TRAP0;
@@ -1205,6 +1209,10 @@ void HELPER(write_disk)(CPUM68KState *env, uint32_t tt)
         cpu_stl_kernel(env, env->aregs[0] + ioActCount,  ActCount);
         cpu_stl_kernel(env, env->aregs[0] + ioResult,    Result);
         env->dregs[0] = Result;
+        env->cc_n = Result;
+        env->cc_z = env->cc_n;
+        env->cc_c = 0;
+        env->cc_v = 0;
 
         if (Completion) {
             //cs->exception_index = EXCP_TRAP0;
