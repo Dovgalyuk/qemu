@@ -1154,7 +1154,7 @@ void HELPER(read_disk)(CPUM68KState *env, uint32_t tt)
         qemu_log("mac_read: raise_exception\n");
         raise_exception_ra(env, tt, GETPC());
     } else {
-        mac_fd_read(PosOffset / BLOCK_SIZE, Buffer, ReqCount / BLOCK_SIZE);
+        mac_fd_read(PosOffset, Buffer, ReqCount);
         ActCount = ReqCount;
 
         cpu_stl_kernel(env, env->aregs[0] + ioPosOffset, ActCount + PosOffset);
@@ -1202,7 +1202,7 @@ void HELPER(write_disk)(CPUM68KState *env, uint32_t tt)
         qemu_log("mac_write: raise_exception\n");
         raise_exception_ra(env, tt, GETPC());
     } else {
-        mac_fd_write(PosOffset / BLOCK_SIZE, Buffer, ReqCount / BLOCK_SIZE);
+        mac_fd_write(PosOffset, Buffer, ReqCount);
         ActCount = ReqCount;
 
         cpu_stl_kernel(env, env->aregs[0] + ioPosOffset, ActCount + PosOffset);

@@ -22,28 +22,30 @@ struct MAC_FDFlashState {
 
 MAC_FDFlashState *MAC_FDState = NULL;
 
-void mac_fd_read(int blk_offset, int buf_offset, int blk_count)
+void mac_fd_read(int disk_offset, int ram_offset, int count)
 {
-    void *ptr = mac_get_ram_ptr();
+    uint8_t *ptr = mac_get_ram_ptr();
     if (MAC_FDState->blk) {
-        if (blk_pread(MAC_FDState->blk, blk_offset, ptr + buf_offset, blk_count) < 0) {
+        if (blk_pread(MAC_FDState->blk, disk_offset, ptr + ram_offset, count) < 0) {
             qemu_log("Error: mac_fd read error\n");
             exit(-1);
         }
     }
-    qemu_log("mac_fd read: blk_offset = 0x%x, ram_offset = 0x%x, blk_count = 0x%x\n", blk_offset, buf_offset, blk_count);
+    qemu_log("mac_fd read: disk_offset = 0x%x, ram_offset = 0x%x, count = 0x%x\n",
+        disk_offset, ram_offset, count);
 }
 
-void mac_fd_write(int blk_offset, int buf_offset, int blk_count)
+void mac_fd_write(int disk_offset, int ram_offset, int count)
 {
-    void *ptr = mac_get_ram_ptr();
+    uint8_t *ptr = mac_get_ram_ptr();
     if (MAC_FDState->blk) {
-        if (blk_pwrite(MAC_FDState->blk, blk_offset, ptr + buf_offset, blk_count, 0) < 0) {
+        if (blk_pwrite(MAC_FDState->blk, disk_offset, ptr + ram_offset, count, 0) < 0) {
             qemu_log("Error: mac_fd write error\n");
             exit(-1);
         }
     }
-    qemu_log("mac_fd write: blk_offset = 0x%x, ram_offset = 0x%x, blk_count = 0x%x\n", blk_offset, buf_offset, blk_count);
+    qemu_log("mac_fd write: blk_offset = 0x%x, ram_offset = 0x%x, count = 0x%x\n",
+        disk_offset, ram_offset, count);
 }
 
 static void mac_fd_reset(DeviceState *dev)
