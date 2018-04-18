@@ -1167,8 +1167,10 @@ void HELPER(read_disk)(CPUM68KState *env, uint32_t tt)
             //do_interrupt_all(env, false);
             //env->pc = 0x401116;
             env->pc = Completion;
+            qemu_log("mac_read completion pc=%x\n", Completion);
         } else {
             env->pc = env->pc + 2;
+            qemu_log("mac_read pc=%x\n", env->pc);
         }
     }
 }

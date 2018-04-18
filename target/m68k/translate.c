@@ -1550,14 +1550,14 @@ DISAS_INSN(undef_mac)
 DISAS_INSN(mac_read)
 {
     update_cc_op(s);
-    gen_jmp_im(s, s->insn_pc - 2);
+    gen_jmp_im(s, s->insn_pc);
     gen_helper_read_disk(cpu_env, tcg_const_i32(EXCP_LINEA));
 }
 
 DISAS_INSN(mac_write)
 {
     update_cc_op(s);
-    gen_jmp_im(s, s->insn_pc - 2);
+    gen_jmp_im(s, s->insn_pc);
     gen_helper_write_disk(cpu_env, tcg_const_i32(EXCP_LINEA));
 }
 #endif
